@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Universo Vocacional 3D</title>
+<!-- Dependências via CDN (versões fixas) -->
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+  :root{--bg:#05060f;--glass:rgba(14,19,42,.58);--line:rgba(255,255,255,.13);--tx:#e6ecff;
+    box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #stage,#labels{position:absolute;inset:0}
+  #labels{overflow:hidden;pointer-events:none}
+  canvas{display:block;touch-action:none}
+  /* Painéis glassmorphic */
+  .glass{background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:16px;box-shadow:0 0 34px rgba(34,211,238,.09)}
+  .btn{padding:6px 10px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.05);font-size:12px;cursor:pointer;color:inherit;transition:.2s}
+  .btn:hover{background:rgba(255,255,255,.12)}
+  .btn.on{background:rgba(34,211,238,.22);border-color:#22d3ee;box-shadow:0 0 12px rgba(34,211,238,.4)}
+  /* Rótulos HTML projetados sobre os nós 3D */
+  .lbl{position:absolute;left:0;top:0;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(8,12,28,.62);
+    border:1px solid var(--c);color:#fff;white-space:nowrap;text-shadow:0 0 8px var(--c);will-change:transform}
+  .lbl.core{font-size:13px;font-weight:600;padding:3px 10px}
+  /* rótulo do curso selecionado: invertido (fundo claro) para se destacar dos demais */
+  .lbl.sel{background:#fff;color:#05060f;text-shadow:none;font-weight:700;font-size:12px;z-index:5;box-shadow:0 0 16px var(--c)}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--c);cursor:pointer;background:rgba(255,255,255,.04)}
+  #toast{transition:opacity .3s}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="labels"></div>
+
+<!-- Painel esquerdo: controles -->
+<section class="glass fixed top-2 left-2 p-3 w-[min(94vw,330px)] z-10" style="top:calc(.5rem + env(safe-area-inset-top,0px))">
+  <div class="flex items-start justify-between gap-2">
+    <div>
+      <h1 class="text-lg font-bold bg-gradient-to-r from-cyan-300 via-violet-400 to-rose-400 bg-clip-text text-transparent">Universo Vocacional</h1>
+      <p class="text-[11px] text-slate-300">SENAI Guarulhos · Cursos FIC. Expanda as áreas e conecte cursos para montar seu itinerário.</p>
+    </div>
+    <button class="btn" onclick="togglePanel('pc')">▾</button>
+  </div>
+  <div id="pc" class="mt-3 space-y-2">
+    <div class="flex gap-2">
+      <button id="mExp" class="btn on flex-1" onclick="setMode('explore')">🔭 Explorar</button>
+      <button id="mLink" class="btn flex-1" onclick="setMode('link')">🔗 Conectar</button>
+    </div>
+    <div class="flex gap-2">
+      <button class="btn flex-1" onclick="expandAll(true)">Expandir tudo</button>
+      <button class="btn flex-1" onclick="expandAll(false)">Recolher</button>
+      <button class="btn" onclick="resetView()">⟲</button>
+    </div>
+    <div id="legend" class="flex flex-wrap gap-1.5"></div>
+    <p class="text-[11px] text-slate-400">Arraste para girar · role/pince para zoom · toque na esfera de uma área para expandir. No modo <b>Conectar</b>, toque em dois nós de áreas diferentes; a pontuação de conexão aparece no painel à direita.</p>
+    <p class="text-[11px] text-slate-400 border-t border-white/10 pt-2">📍 Seg–Sex 08h–20h · Sáb 09h–15h<br>📞 11 2461-6751 / 11 2461-6750 · @senaihermenegildo</p>
+  </div>
+</section>
+
+<!-- Painel direito: seleção + itinerário -->
+<section class="glass fixed right-2 bottom-2 left-2 md:left-auto md:bottom-auto md:w-80 p-3 z-10 md:top-2" style="bottom:calc(.5rem + env(safe-area-inset-bottom,0px))">
+  <div class="flex items-center justify-between">
+    <h2 class="font-semibold text-sm">Seu Itinerário Formativo</h2>
+    <button class="btn" onclick="togglePanel('pi')">▾</button>
+  </div>
+  <div id="pi" class="mt-2 max-h-[34vh] md:max-h-[70vh] overflow-y-auto text-sm"></div>
+</section>
+
+<div id="toast" class="glass fixed left-1/2 -translate-x-1/2 px-4 py-2 text-xs z-20 opacity-0 pointer-events-none" style="bottom:4.5rem"></div>
+
+<!-- Card do curso: inscrição + empregabilidade (preenchido por openCard) -->
+<div id="card" class="glass fixed left-1/2 -translate-x-1/2 p-4 z-30 hidden w-[min(94vw,420px)] max-h-[82vh] overflow-y-auto" style="bottom:calc(.75rem + env(safe-area-inset-bottom,0px))"></div>
+
+<script>
+/* ============ 1) DADOS: 6 áreas com os cursos FIC do folheto ============ */
+// Link de inscrição: por padrão abre o WhatsApp do SENAI (número do folheto) com mensagem pronta.
+// Para usar o link oficial de matrícula, troque ENROLL_BASE por uma função/URL própria.
+const ENROLL_BASE='https://wa.me/551124616751?text=';
+// Texto de empregabilidade por área (genérico) — e por curso, se quiser sobrescrever: EMP_CURSO['Nome completo do curso']='texto'
+const EMP_AREA={
+ ges:'Competências de gestão são valorizadas em indústrias, comércio e serviços: rotinas administrativas, RH, folha de pagamento, qualidade e liderança de equipes aparecem em empresas de todos os portes.',
+ tec:'Informática, análise de dados e IA estão presentes em quase todos os setores. Dominar Excel, Power BI, Python e ferramentas de IA generativa ajuda em funções de dados, automação de rotinas e suporte.',
+ log:'A logística sustenta indústria, comércio e e-commerce. Operação de empilhadeira, planejamento da produção e análise logística são competências buscadas em armazéns, centros de distribuição e fábricas.',
+ mec:'A indústria precisa de profissionais para usinagem CNC, metrologia, desenho e manutenção. CAD/CAM e leitura de desenho técnico abrem caminho em fábricas, ferramentarias e oficinas.',
+ mca:'Automação, energia solar e instalações elétricas estão em expansão. Eletricistas, programadores de CLP e instaladores fotovoltaicos atuam em indústrias, construtoras e empresas de energia.',
+ civ:'A construção civil abrange obras residenciais e comerciais. Drywall, pintura e desenho em AutoCAD são serviços frequentes, e a pilotagem de drone cresce em inspeção e mapeamento de obras.'
+};
+const EMP_CURSO={};
+// Sugestão de trilha: curso (nome completo) → cursos seguintes do folheto. Não são pré-requisitos oficiais.
+const NEXT={
+ 'Informática Básica':['Excel Básico','Fundamentos do Python 1'],
+ 'Excel Básico':['Excel Avançado','Microsoft Power BI'],
+ 'Excel Básico com IA Generativa':['Excel Avançado'],
+ 'Excel Avançado':['Microsoft Power BI'],
+ 'Excel Completo':['Microsoft Power BI'],
+ 'Microsoft Power BI':['Power BI e Análise de Dados com IA'],
+ 'Fundamentos do Python 1':['Programação em Python'],
+ 'Programação em Python':['Machine Learning Aplicada à Indústria','Programação em Inteligência Artificial Generativa'],
+ 'Fundamentos de Inteligência Artificial e Análise de Dados':['Power BI e Análise de Dados com IA','Criação de Agentes de IA com o Microsoft AI Foundry'],
+ 'Fundamentos de Inteligência Artificial Generativa - Google Cloud':['Programação em Inteligência Artificial Generativa'],
+ 'Programação em Inteligência Artificial Generativa':['Desenvolvimento de Aplicações com IA Generativa utilizando Google Antigravity'],
+ 'Controladores Lógicos Programáveis':['CLP Siemens - TIA Portal'],
+ 'CLP Siemens - TIA Portal':['CLP Siemens - TIA Portal - Avançado'],
+ 'Comandos Elétricos':['Controladores Lógicos Programáveis','Inversores'],
+ 'Eletricista Instalador Predial':['Montagem de Padrão de Entrada - Baixa Tensão','Comandos Elétricos'],
+ 'Energia Solar Fotovoltaica - Tecnologias e Aplicações':['Instalação de Sistemas Fotovoltaicos'],
+ 'Leitura e Interpretação de Desenho Técnico Mecânico':['AutoCAD 2D','SolidWorks'],
+ 'AutoCAD 2D':['SolidWorks'],
+ 'Ajustador Mecânico':['Metrologia Industrial Aplicada à Projetos Mecânicos','Operação de Torno CNC'],
+ 'Operação de Torno CNC':['Programação CAM para Torno CNC','Operação de Centro de Usinagem CNC'],
+ 'Fundamentos dos Processos Logísticos':['Analista de Logística','Planejamento e Controle da Produção'],
+ 'NR-11 - Operação de Empilhadeira':['NR-11 - Operação de Empilhadeira - Reciclagem'],
+ 'Auxiliar Administrativo':['Assistente de Recursos Humanos','Cálculo da Folha de Pagamento'],
+ 'Assistente de Recursos Humanos':['Analista de Recursos Humanos'],
+ 'Liderança':['Técnicas de Como Falar em Público'],
+ 'Auditor Interno NBR ISO 9001':['Analista da Qualidade'],
+ 'Yellow Belt em Lean Seis Sigma':['Analista da Qualidade'],
+ 'Instalação de Drywall':['Pintor Imobiliário']
+};
+/* ===== PONTUAÇÃO DE CONEXÃO (baseada nos itinerários SENAI enviados) =====
+   Cada par de cursos recebe de 0 a 100 conforme a regra mais forte que encontrar:
+   aresta direta no itinerário (95) > ligados por etapa intermediária (70) > mesmo itinerário (60)
+   > habilidade em comum (40) > mesma área (25) > sem relação (10). Cada motivo extra soma +5 (máx +10). */
+let lastScore=null; // última análise mostrada no painel direito
+const TRILHAS=[
+ ['Itinerário Informática',['Informática Básica','Operador de Micro','Excel Básico','Excel Avançado','Power BI']],
+ ['Itinerário TI (Dados / Redes / Programação / IoT)',['Python 1','Python','Power BI','Redes Locais']],
+ ['Itinerário Automação Industrial',['Eletricista Predial','Comandos Elétricos','CLP','CLP Siemens TIA','CLP Siemens Avançado']],
+ ['Itinerário Eletricidade',['Eletricista Predial','Comandos Elétricos','Inversores']],
+ ['Itinerário Energias Renováveis',['Eletricista Predial','Energia Solar','Sist. Fotovoltaicos','Drone']],
+ ['Itinerário Gestão da Qualidade / Administração',['Analista da Qualidade','Auditor ISO 9001','Yellow Belt','Assistente de RH','Analista de RH','Aux. Administrativo','Folha de Pagamento','Liderança']],
+ ['Itinerário Logística, Transporte / SST',['Empilhadeira NR-11','Empilhadeira Reciclagem','PCP','Analista de Logística']],
+ ['Itinerário Fabricação Mecânica',['Desenho Técnico','AutoCAD 2D','SolidWorks','Ajustador Mecânico','Torno CNC','Centro de Usinagem CNC','CAM Torno CNC','Metrologia']]
+];
+// Setas dos itinerários: [curso, curso, pontos, "via" (quando há etapa intermediária fora do catálogo)]
+const ARESTAS=[
+ ['Informática Básica','Excel Básico',95],['Excel Básico','Excel Avançado',95],['Excel Avançado','Power BI',95],['Operador de Micro','Power BI',70,'pelo Pacote Office'],
+ ['Python 1','Python',95],
+ ['Eletricista Predial','Comandos Elétricos',95],['Comandos Elétricos','CLP',95],['CLP','CLP Siemens TIA',95],['CLP Siemens TIA','CLP Siemens Avançado',95],['Comandos Elétricos','Inversores',95],
+ ['Eletricista Predial','Energia Solar',95],['Energia Solar','Sist. Fotovoltaicos',95],['Eletricista Predial','Drone',70,'por Drones – Legislação para Voo'],
+ ['Assistente de RH','Analista de RH',95],['Aux. Administrativo','Folha de Pagamento',95],
+ ['Analista da Qualidade','Auditor ISO 9001',70,'pelo Assistente de Controle da Qualidade'],['Yellow Belt','Analista da Qualidade',70,'pelo Assistente de Controle da Qualidade'],['Yellow Belt','Auditor ISO 9001',70,'pelo Assistente de Controle da Qualidade'],
+ ['Empilhadeira NR-11','Empilhadeira Reciclagem',95],['Empilhadeira NR-11','PCP',95],['PCP','Analista de Logística',95],['Empilhadeira NR-11','Analista de Logística',70,'pelo Operador de Logística'],
+ ['Desenho Técnico','AutoCAD 2D',95],['AutoCAD 2D','SolidWorks',95],['Torno CNC','Centro de Usinagem CNC',95],['Torno CNC','CAM Torno CNC',95],['Centro de Usinagem CNC','CAM Torno CNC',95],['Ajustador Mecânico','Centro de Usinagem CNC',95],['Ajustador Mecânico','Torno CNC',70,'pelo Operador de Máquinas Convencionais'],['Metrologia','Desenho Técnico',70,'no apoio às qualificações']
+];
+// Pontes entre áreas: habilidades compartilhadas por cursos de áreas diferentes
+const HABIL=[
+ ['análise de dados e automação de rotinas',['Excel Básico','Excel Avançado','Excel Completo','Excel + IA','Power BI','Power BI + IA','Python 1','Python','ML na Indústria','Fund. de IA e Dados']],
+ ['desenho técnico / CAD',['Desenho Técnico','AutoCAD 2D','SolidWorks','AutoCAD Civil']],
+ ['controle da qualidade (Ferramentas da Qualidade em Gestão e em Fabricação Mecânica)',['Analista da Qualidade','Auditor ISO 9001','Yellow Belt','Metrologia']],
+ ['planejamento e controle (produção e manutenção)',['PCP','PCM']],
+ ['instalações em obras e edificações',['Eletricista Predial','Padrão de Entrada','Drywall','Pintor Imobiliário']]
+];
+function pairScore(x,y){
+  const R=[]; let best=0; const add=(p,t)=>{R.push(t);best=Math.max(best,p)}, a=x.label, b=y.label;
+  ARESTAS.forEach(([p,q,s,via])=>{if((p===a&&q===b)||(p===b&&q===a))add(s,s>=90?'Conexão direta no itinerário (uma etapa leva à outra)':'Conectados no itinerário, '+via)});
+  TRILHAS.forEach(([nm,l])=>{if(l.includes(a)&&l.includes(b))add(60,'Fazem parte do '+nm)});
+  HABIL.forEach(([nm,l])=>{if(l.includes(a)&&l.includes(b))add(40,'Habilidade em comum: '+nm)});
+  if(x.area===y.area)add(25,'Mesma área: '+x.area.nome);
+  if(!R.length)return{score:10,reasons:['Sem relação direta nos itinerários do SENAI — a ponte seria um projeto seu entre as duas áreas.']};
+  return{score:Math.min(100,best+Math.min(10,5*(R.length-1))),reasons:R};
+}
+// Áreas (núcleos) são avaliadas pelo melhor par de cursos entre elas
+function connScore(a,b){
+  const ex=n=>n.core?n.subs:[n]; let best=null;
+  ex(a).forEach(x=>ex(b).forEach(y=>{const r=pairScore(x,y);if(!best||r.score>best.score)best={...r,x,y}}));
+  if(a.core||b.core)best.reasons=[`Melhor ponte: ${best.x.label} ↔ ${best.y.label}`,...best.reasons];
+  return best;
+}
+const nivel=s=>s>=90?['Conexão direta','#34d399']:s>=60?['Mesma trilha','#22d3ee']:s>=40?['Habilidade em comum','#e6c34a']:s>=25?['Mesma área','#ff8c1a']:['Conexão fraca','#e11d48'];
+// Cartão de pontuação do painel direito (ou aviso de origem, enquanto falta o 2º curso)
+function scoreCard(){
+  if(pending)return `<div class="rounded-xl p-2 mb-2 text-xs" style="border:1px dashed ${pending.area.cor}">🔗 Origem: <b>${pending.core?pending.area.nome:pending.full}</b><br>Escolha o segundo curso para ver a pontuação de conexão.</div>`;
+  if(!lastScore)return '';
+  const s=lastScore,[txt,cor]=nivel(s.score),nm=n=>n.core?n.area.nome:n.full;
+  return `<div class="rounded-xl p-2 mb-2" style="border:1px solid ${cor};background:rgba(255,255,255,.04)">
+    <div class="text-[11px] uppercase tracking-wider text-slate-400">Pontuação de conexão</div>
+    <div class="text-xs mt-1"><b style="color:${s.a.area.cor}">${nm(s.a)}</b> ↔ <b style="color:${s.b.area.cor}">${nm(s.b)}</b></div>
+    <div class="flex items-end gap-2 mt-1"><span class="text-3xl font-bold" style="color:${cor}">${s.score}</span><span class="text-xs mb-1">/100 · ${txt}</span></div>
+    <div class="h-1.5 rounded bg-white/10 my-1"><div class="h-full rounded" style="width:${s.score}%;background:${cor}"></div></div>
+    <ul class="list-disc ml-4 text-[11px] text-slate-300">${s.reasons.map(r=>`<li>${r}</li>`).join('')}</ul></div>`;
+}
+// Pula para outro curso: expande a área, foca a câmera e abre o card dele
+function goCourse(name){
+  const n=nodes.find(x=>!x.core&&x.full===name); if(!n)return;
+  if(!n.parent.expanded)toggleCore(n.parent,true);
+  selected=n; focusCore(n.parent); openCard(n); refresh();
+}
+const AREAS=[
+ {id:'ges',nome:'Gestão',ico:'📊',cor:'#22d3ee',desc:'Planejar, liderar pessoas e processos e tomar decisões para fazer organizações prosperarem.',subs:[['Analista de RH','Analista de Recursos Humanos',80],['Analista da Qualidade','Analista da Qualidade',160],['Assistente de RH','Assistente de Recursos Humanos',160],['Auditor ISO 9001','Auditor Interno NBR ISO 9001',24],['Liderança','Liderança',24],['Falar em Público','Técnicas de Como Falar em Público',20],['Yellow Belt','Yellow Belt em Lean Seis Sigma',40],['Aux. Administrativo','Auxiliar Administrativo',160],['Folha de Pagamento','Cálculo da Folha de Pagamento',40]]},
+ {id:'tec',nome:'Tecnologia',ico:'💻',cor:'#2f9e44',desc:'Projetar software, redes e dados que sustentam a indústria 4.0.',subs:[['Operador de Micro','Operador de Microcomputador',160],['Informática Básica','Informática Básica',60],['Excel Básico','Excel Básico',40],['Excel Avançado','Excel Avançado',40],['Excel Completo','Excel Completo',80],['Power BI','Microsoft Power BI',32],['Excel + IA','Excel Básico com IA Generativa',20,1],['Fund. de IA e Dados','Fundamentos de Inteligência Artificial e Análise de Dados',40,1],['Agentes de IA','Criação de Agentes de IA com o Microsoft AI Foundry',40,1],['Apps com IA Gen.','Desenvolvimento de Aplicações com IA Generativa utilizando Google Antigravity',40,1],['IA Gen. Google Cloud','Fundamentos de Inteligência Artificial Generativa - Google Cloud',20,1],['Python 1','Fundamentos do Python 1',30],['ML na Indústria','Machine Learning Aplicada à Indústria',60,1],['Marketing Digital IA','Marketing Digital com Inteligência Artificial',30,1],['Programação em IA Gen.','Programação em Inteligência Artificial Generativa',40,1],['Redes Locais','Redes de Computadores - Implantação de Redes Locais',48],['Power BI + IA','Power BI e Análise de Dados com IA',60,1],['Python','Programação em Python',60]]},
+ {id:'log',nome:'Logística',ico:'🚚',cor:'#e6c34a',desc:'Fazer produtos, informações e pessoas chegarem ao lugar certo, na hora certa.',subs:[['Empilhadeira NR-11','NR-11 - Operação de Empilhadeira',32],['Empilhadeira Reciclagem','NR-11 - Operação de Empilhadeira - Reciclagem',16],['PCP','Planejamento e Controle da Produção',40],['Analista de Logística','Analista de Logística',120],['Processos Logísticos','Fundamentos dos Processos Logísticos',80]]},
+ {id:'mec',nome:'Mecânica',ico:'⚙',cor:'#a855f7',desc:'Projetar, fabricar e manter máquinas, peças e sistemas mecânicos.',subs:[['Desenho Técnico','Leitura e Interpretação de Desenho Técnico Mecânico',40],['AutoCAD 2D','AutoCAD 2D',40],['SolidWorks','SolidWorks',80],['Ajustador Mecânico','Ajustador Mecânico',200],['Centro de Usinagem CNC','Operação de Centro de Usinagem CNC',120],['Metrologia','Metrologia Industrial Aplicada à Projetos Mecânicos',60],['CAM Torno CNC','Programação CAM para Torno CNC',40],['Torno CNC','Operação de Torno CNC',120],['PCM','Planejamento e Controle da Manutenção',96]]},
+ {id:'mca',nome:'Mecatrônica e Elétrica',ico:'🤖',cor:'#ff8c1a',desc:'Unir mecânica, eletrônica e controle para automatizar e energizar o mundo.',subs:[['Eletricista Predial','Eletricista Instalador Predial',160],['CLP','Controladores Lógicos Programáveis',60],['Inversores','Inversores',24],['Padrão de Entrada','Montagem de Padrão de Entrada - Baixa Tensão',40],['Comandos Elétricos','Comandos Elétricos',144],['Energia Solar','Energia Solar Fotovoltaica - Tecnologias e Aplicações',24],['Sist. Fotovoltaicos','Instalação de Sistemas Fotovoltaicos',48],['CLP Siemens TIA','CLP Siemens - TIA Portal',40],['CLP Siemens Avançado','CLP Siemens - TIA Portal - Avançado',40]]},
+ {id:'civ',nome:'Construção Civil',ico:'🏗',cor:'#e11d48',desc:'Planejar e erguer edificações e infraestrutura com segurança e eficiência.',subs:[['Drywall','Instalação de Drywall',48],['AutoCAD Civil','AutoCAD 2D Aplicado à Construção Civil',48],['Pintor Imobiliário','Pintor Imobiliário',160],['Drone','Drone - Pilotagem',32]]}
+];
+
+/* ============ 2) CENA BASE ============ */
+const $=s=>document.querySelector(s), labels=$('#labels');
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+$('#stage').appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.fog=new THREE.FogExp2(0x05060f,.005);
+const camera=new THREE.PerspectiveCamera(55,1,.1,600);
+const HOME=new THREE.Vector3(0,28,56); camera.position.copy(HOME);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+Object.assign(controls,{enableDamping:true,minDistance:8,maxDistance:130,autoRotate:true,autoRotateSpeed:.45});
+let goalCam=null, goalT=null; // alvos de transição suave da câmera
+controls.addEventListener('start',()=>{controls.autoRotate=false;goalCam=goalT=null});
+scene.add(new THREE.AmbientLight(0xffffff,.55)); scene.add(new THREE.PointLight(0xffffff,1.2,120));
+
+// Textura radial para brilho (glow) e partículas
+const glowTex=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const g=c.getContext('2d'),r=g.createRadialGradient(64,64,0,64,64,64);
+  r.addColorStop(0,'rgba(255,255,255,1)');r.addColorStop(.25,'rgba(255,255,255,.45)');r.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=r;g.fillRect(0,0,128,128);return new THREE.CanvasTexture(c)})();
+
+// Campo de estrelas
+(()=>{const n=1600,p=new Float32Array(n*3);for(let i=0;i<n;i++){const r=90+Math.random()*160,a=Math.random()*6.283,b=Math.acos(2*Math.random()-1);
+  p.set([r*Math.sin(b)*Math.cos(a),r*Math.cos(b),r*Math.sin(b)*Math.sin(a)],i*3)}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(p,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({size:.9,color:0x9bb4ff,transparent:true,opacity:.7,depthWrite:false})))})();
+
+/* ============ 3) NÓS (núcleos e sub-módulos) ============ */
+const nodes=[];
+function makeNode(area,label,r,core){
+  const col=new THREE.Color(area.cor), group=new THREE.Group();
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(r,32,24),
+    new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:core?.7:.95,roughness:.35,metalness:.3}));
+  const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:col,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,opacity:core?.9:.7}));
+  glow.scale.setScalar(r*(core?6:5));
+  group.add(mesh,glow);
+  const el=document.createElement('div'); el.className='lbl'+(core?' core':''); el.textContent=label; el.style.setProperty('--c',area.cor); labels.appendChild(el);
+  const n={id:nodes.length,area,label,core,group,mesh,glow,el,scale:1,goal:1,subs:[],expanded:false};
+  mesh.userData.node=n; nodes.push(n); return n;
+}
+const cores=AREAS.map((a,i)=>{
+  const ang=i/AREAS.length*Math.PI*2, core=makeNode(a,a.ico+' '+a.nome,2.3,true);
+  core.group.position.set(Math.cos(ang)*22,Math.sin(i*1.7)*3,Math.sin(ang)*22);
+  // Anel decorativo + grupo "orbit" que gira lentamente com os sub-módulos
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(3.4,.05,8,64),new THREE.MeshBasicMaterial({color:a.cor,transparent:true,opacity:.6}));
+  ring.rotation.x=1.2; core.group.add(ring); core.ring=ring;
+  core.orbit=new THREE.Group(); core.group.add(core.orbit);
+  core.R=5.5+a.subs.length*.17; // raio da casca cresce com o nº de cursos
+  a.subs.forEach((s,k)=>{
+    // Esfera de Fibonacci: distribui os N cursos de forma uniforme ao redor do núcleo
+    const sub=makeNode(a,s[0],.9,false), y=1-(2*k+1)/a.subs.length, rr=Math.sqrt(1-y*y), ph=k*2.39996, R=core.R;
+    Object.assign(sub,{full:s[1],hours:s[2],ia:!!s[3]});
+    sub.group.position.set(Math.cos(ph)*rr*R,y*R*.75,Math.sin(ph)*rr*R);
+    // linha tênue ligando o sub-módulo ao núcleo
+    const lg=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),sub.group.position.clone().negate()]);
+    sub.group.add(new THREE.Line(lg,new THREE.LineBasicMaterial({color:a.cor,transparent:true,opacity:.35})));
+    sub.scale=sub.goal=0; sub.group.visible=false; sub.parent=core;
+    core.orbit.add(sub.group); core.subs.push(sub);
+  });
+  scene.add(core.group); return core;
+});
+// Hub central ("Você") e fios para os núcleos
+const hub=new THREE.Mesh(new THREE.IcosahedronGeometry(1.6,1),new THREE.MeshBasicMaterial({color:0xffffff,wireframe:true,transparent:true,opacity:.8}));
+scene.add(hub);
+// Rótulo da esfera central
+const hubEl=document.createElement('div'); hubEl.className='lbl core'; hubEl.style.setProperty('--c','#ffffff'); hubEl.textContent='SENAI 1.22'; labels.appendChild(hubEl);
+// Anel branco que marca o curso selecionado (reaproveitado: muda de pai a cada seleção)
+const selRing=new THREE.Mesh(new THREE.TorusGeometry(1.7,.07,8,48),new THREE.MeshBasicMaterial({color:0xffffff})); selRing.visible=false;
+cores.forEach(c=>scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),c.group.position]),
+  new THREE.LineBasicMaterial({color:c.area.cor,transparent:true,opacity:.18}))));
+
+/* ============ 4) CONEXÕES INTERDISCIPLINARES ============ */
+const links=new Map(), A=new THREE.Vector3(), B=new THREE.Vector3(), C=new THREE.Vector3(), T=new THREE.Vector3();
+const bez=(t,o)=>{const u=1-t;return o.set(0,0,0).addScaledVector(A,u*u).addScaledVector(C,2*u*t).addScaledVector(B,t*t)};
+function toggleLink(a,b){
+  const key=[a.id,b.id].sort((x,y)=>x-y).join('-');
+  if(links.has(key)) return removeLink(key);
+  const N=48, pos=new Float32Array(N*3), col=new Float32Array(N*3);
+  for(let i=0;i<N;i++){const c=new THREE.Color(a.area.cor).lerp(new THREE.Color(b.area.cor),i/(N-1));col.set([c.r,c.g,c.b],i*3)}
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const line=new THREE.Line(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.95,blending:THREE.AdditiveBlending}));
+  // 5 partículas fluindo pela curva
+  const pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(15),3));
+  const pts=new THREE.Points(pg,new THREE.PointsMaterial({size:2.4,map:glowTex,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending}));
+  line.frustumCulled=pts.frustumCulled=false; scene.add(line,pts);
+  links.set(key,{a,b,line,pts,N,score:connScore(a,b).score}); refresh(); toast(`Conexão criada: ${a.label} ↔ ${b.label}`);
+}
+function removeLink(key){const l=links.get(key); if(!l)return; scene.remove(l.line,l.pts); l.line.geometry.dispose(); l.pts.geometry.dispose(); links.delete(key); refresh()}
+
+/* ============ 5) INTERAÇÃO ============ */
+let mode='explore', pending=null, selected=null;
+function setMode(m){mode=m;pending=null;lastScore=null;closeCard();$('#mExp').classList.toggle('on',m==='explore');$('#mLink').classList.toggle('on',m==='link');
+  toast(m==='link'?'Modo Conectar: escolha o primeiro nó':'Modo Explorar')}
+function toggleCore(c,on){c.expanded=on===undefined?!c.expanded:on;c.subs.forEach(s=>s.goal=c.expanded?1:0)}
+function expandAll(on){cores.forEach(c=>toggleCore(c,on));if(!on&&pending&&!pending.core)pending=null}
+function focusCore(c){controls.autoRotate=false;const P=new THREE.Vector3();c.group.getWorldPosition(P);
+  const d=new THREE.Vector3(P.x,0,P.z).normalize();goalT=P.clone();goalCam=P.clone().addScaledVector(d,c.R+12).add(new THREE.Vector3(0,c.R*.5+3,0))}
+function resetView(){controls.autoRotate=false;goalT=new THREE.Vector3();goalCam=HOME.clone()}
+function pick(n){
+  selected=n;
+  if(mode==='explore'){ if(n.core){closeCard();toggleCore(n);focusCore(n)} else openCard(n) }
+  else{
+    if(!pending){pending=n;lastScore=null;toast(`Origem: ${n.label}. Agora escolha outro curso.`)}
+    else if(pending===n){pending=null}
+    else if(pending.area===n.area){lastScore={a:pending,b:n,...connScore(pending,n)};toast('Mesma área: veja a pontuação, mas conecte cursos de áreas diferentes');pending=null}
+    else{lastScore={a:pending,b:n,...connScore(pending,n)};toggleLink(pending,n);pending=null}
+  }
+  refresh();
+}
+// Distingue clique de arraste (para não conflitar com OrbitControls)
+const ray=new THREE.Raycaster(), ndc=new THREE.Vector2(); let down=null;
+renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);
+renderer.domElement.addEventListener('pointerup',e=>{
+  if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>6)return;
+  ndc.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1); ray.setFromCamera(ndc,camera);
+  const hit=ray.intersectObjects(nodes.filter(n=>n.group.visible).map(n=>n.mesh),false)[0];
+  if(hit)pick(hit.object.userData.node);
+});
+
+/* ============ 6) INTERFACE (painéis) ============ */
+$('#legend').innerHTML=AREAS.map((a,i)=>`<span class="chip" style="--c:${a.cor}" onclick="focusCore(cores[${i}])"><i style="width:8px;height:8px;border-radius:50%;background:${a.cor};box-shadow:0 0 8px ${a.cor}"></i>${a.nome}</span>`).join('');
+function togglePanel(id){$('#'+id).classList.toggle('hidden')}
+// Card do curso selecionado: link de inscrição + espaço de empregabilidade
+function closeCard(){$('#card').classList.add('hidden'); if(selected&&!selected.core){selected=null;refresh()} /* ao fechar, remove o destaque */}
+function openCard(n){
+  const a=n.area, c=$('#card'), emp=EMP_CURSO[n.full]||EMP_AREA[a.id];
+  const url=ENROLL_BASE+encodeURIComponent('Olá! Quero me inscrever no curso: '+n.full);
+  // Próximo passo: etapa de matrícula + sugestões de continuidade (chips clicáveis)
+  const nxt=(NEXT[n.full]||[]).map(f=>nodes.find(x=>!x.core&&x.full===f)).filter(Boolean);
+  const stepHtml=`<div class="mt-2 rounded-xl p-2 text-xs text-slate-200" style="background:rgba(255,255,255,.05);border:1px solid var(--line)">
+    <div class="font-semibold mb-1">🧭 Próximo passo</div>
+    <ol class="list-decimal ml-4 space-y-1"><li>Inscreva-se e confirme turmas, datas e vagas com o SENAI (11 2461-6751).</li>
+    <li>${nxt.length?`Depois, siga a trilha (sugestão, não é pré-requisito oficial):<div class="flex flex-wrap gap-1.5 mt-1">${nxt.map(x=>`<span class="chip" style="--c:${x.area.cor}" onclick="goCourse('${x.full}')">${x.label} →</span>`).join('')}</div>`:'Monte sua trilha: use o modo Conectar para ligar este curso a outro, de outra área.'}</li></ol></div>`;
+  c.style.borderColor=a.cor; c.style.boxShadow=`0 0 32px ${a.cor}55`;
+  c.innerHTML=`<div class="flex items-start justify-between gap-2">
+    <div><span class="chip" style="--c:${a.cor}">${a.ico} ${a.nome}</span><h3 class="font-bold text-base mt-2 leading-snug">${n.full}</h3></div>
+    <button class="btn" onclick="closeCard()">✕</button></div>
+    <div class="flex flex-wrap gap-2 mt-2"><span class="chip" style="--c:${a.cor}">⏱ ${n.hours}h</span>${n.ia?'<span class="chip" style="--c:#a855f7">✨ Curso de IA gratuito</span>':''}${n.full==='Eletricista Instalador Predial'?'<span class="chip" style="--c:#e11d48">💳 até 12x no cartão</span>':''}</div>
+    <div class="mt-3 rounded-xl p-2 text-xs text-slate-200" style="background:rgba(255,255,255,.05);border:1px solid var(--line)">
+      <div class="font-semibold mb-1">💼 Empregabilidade</div>${emp}
+      <div class="text-slate-400 mt-1">Veja vagas e oportunidades no canal do SENAI indicado no folheto.</div></div>
+    ${stepHtml}<a href="${url}" target="_blank" rel="noopener noreferrer" class="block text-center mt-3 py-2 rounded-xl font-semibold text-sm text-black" style="background:${a.cor};box-shadow:0 0 18px ${a.cor}88">Inscreva-se neste curso →</a>`;
+  c.classList.remove('hidden');
+}
+function toast(m){const t=$('#toast');t.textContent=m;t.style.opacity=1;clearTimeout(t._h);t._h=setTimeout(()=>t.style.opacity=0,2400)}
+function refresh(){
+  const touched=new Set(); links.forEach(l=>{touched.add(l.a.area.id);touched.add(l.b.area.id)});
+  // soma a carga horária dos cursos (nós-folha) presentes nas conexões
+  const cs=new Set(); links.forEach(l=>[l.a,l.b].forEach(x=>{if(!x.core)cs.add(x)}));
+  const hoursTxt=cs.size?`<br>Cursos no itinerário: <b>${cs.size}</b> · <b>${[...cs].reduce((s,x)=>s+x.hours,0)}h</b>`:'';
+  let h='';
+  if(selected){const a=selected.area;h+=`<div class="rounded-xl p-2 mb-2" style="border:1px solid ${a.cor};background:rgba(255,255,255,.04)">
+    <div class="text-[11px] uppercase tracking-wider" style="color:${a.cor}">${a.nome}</div>
+    <div class="font-semibold">${selected.core?a.ico+' '+a.nome:selected.full}</div>
+    <p class="text-xs text-slate-300">${selected.core?`${a.desc}<br><b>${a.subs.length} cursos FIC · ${a.subs.reduce((s,c)=>s+c[2],0)}h no total</b>`:`<b>${selected.hours}h</b> de carga horária${selected.ia?' · ✨ Curso de IA (gratuito, conforme o folheto)':''}`}</p></div>`}
+  h+=scoreCard();
+  h+=`<div class="text-xs text-slate-300 mb-1">Áreas conectadas: <b>${touched.size}/6</b> · Conexões: <b>${links.size}</b>${hoursTxt}${links.size?`<br>Pontuação média: <b>${Math.round([...links.values()].reduce((s,l)=>s+l.score,0)/links.size)}/100</b>`:''}</div>
+    <div class="h-1.5 rounded bg-white/10 mb-2"><div class="h-full rounded bg-gradient-to-r from-cyan-400 to-rose-500" style="width:${touched.size/6*100}%"></div></div>`;
+  h+=links.size?[...links].map(([k,l])=>`<div class="flex items-center justify-between gap-2 text-xs py-1 border-b border-white/10">
+      <span><b style="color:${l.a.area.cor}">${l.a.label}</b> ↔ <b style="color:${l.b.area.cor}">${l.b.label}</b> <span style="color:${nivel(l.score)[1]}">· ${l.score} pts</span></span>
+      <button class="btn" onclick="removeLink('${k}')">✕</button></div>`).join('')
+    +`<p class="text-[11px] text-slate-400 mt-2">💡 Cada conexão é um convite a um projeto interdisciplinar.</p>`
+    :`<p class="text-xs text-slate-400">Ative o modo <b>Conectar</b> e una saberes de áreas diferentes para montar sua trilha.</p>`;
+  $('#pi').innerHTML=h;
+}
+refresh();
+if(innerWidth<768){togglePanel('pc');togglePanel('pi')} // painéis recolhidos no celular
+
+/* ============ 7) LOOP DE ANIMAÇÃO ============ */
+const lblV=new THREE.Vector3(), clock=new THREE.Clock();
+function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix()}
+addEventListener('resize',resize); resize();
+(function loop(){
+  requestAnimationFrame(loop);
+  const t=clock.getElapsedTime();
+  hub.rotation.y=t*.4; hub.rotation.x=t*.2;
+  // anel de seleção: acompanha o curso e fica sempre virado para a câmera
+  const sv=selected&&!selected.core&&selected.group.visible;
+  selRing.visible=!!sv;
+  if(sv){if(selRing.parent!==selected.group)selected.group.add(selRing);selRing.lookAt(camera.position);selRing.scale.setScalar(1+.12*Math.sin(t*4))}
+  hub.getWorldPosition(lblV); lblV.project(camera); hubEl.style.display=lblV.z>1?'none':'block';
+  hubEl.style.transform=`translate(${(lblV.x*.5+.5)*innerWidth}px,${(-lblV.y*.5+.5)*innerHeight}px) translate(-50%,-230%)`;
+  // Transição suave de câmera
+  if(goalT){const d=goalT.clone().sub(controls.target).multiplyScalar(.06);controls.target.add(d);camera.position.add(d)}
+  if(goalCam)camera.position.lerp(goalCam,.05);
+  controls.update();
+  nodes.forEach(n=>{
+    if(n.core){n.ring.rotation.z=t*.6;n.orbit.rotation.y=t*.15}
+    else{ n.scale+=(n.goal-n.scale)*.12; n.group.scale.setScalar(Math.max(n.scale,.0001)); n.group.visible=n.scale>.03 }
+    // destaque: o curso selecionado fica maior e mais brilhante; os outros cursos escurecem um pouco
+    const isSel=n===selected&&!n.core, dim=selected&&!selected.core&&!n.core&&!isSel;
+    n.mesh.scale.setScalar(n===pending?1+.25*Math.sin(t*7):isSel?1.6+.12*Math.sin(t*4):1);
+    n.mesh.material.emissiveIntensity=n.core?.7:isSel?1.8:dim?.3:.95;
+    n.glow.material.opacity=n.core?.9:isSel?1:dim?.22:.7;
+    n.glow.scale.setScalar(n.core?13.8:isSel?9:dim?3.5:4.5);
+    n.el.classList.toggle('sel',isSel);
+    // projeta posição 3D → 2D para posicionar o rótulo HTML
+    const vis=n.group.visible; n.el.style.display=vis?'block':'none';
+    if(vis){n.group.getWorldPosition(lblV);const dist=camera.position.distanceTo(lblV);lblV.project(camera);
+      // rótulos de cursos só aparecem perto da câmera, selecionados ou já conectados (evita poluição visual)
+      const show=n.core||dist<30||n===selected||n===pending||[...links.values()].some(l=>l.a===n||l.b===n);
+      if(lblV.z>1||!show)n.el.style.display='none';
+      else n.el.style.transform=`translate(${(lblV.x*.5+.5)*innerWidth}px,${(-lblV.y*.5+.5)*innerHeight}px) translate(-50%,${n.core?'-230%':'-170%'})`}
+  });
+  // Atualiza curvas e partículas das conexões
+  links.forEach(l=>{
+    const ok=l.a.group.visible&&l.b.group.visible; l.line.visible=l.pts.visible=ok; if(!ok)return;
+    l.a.group.getWorldPosition(A); l.b.group.getWorldPosition(B); C.copy(A).add(B).multiplyScalar(.25); C.y+=7;
+    const p=l.line.geometry.attributes.position; for(let i=0;i<l.N;i++){bez(i/(l.N-1),T);p.setXYZ(i,T.x,T.y,T.z)} p.needsUpdate=true;
+    const q=l.pts.geometry.attributes.position; for(let i=0;i<5;i++){bez((t*.2+i/5)%1,T);q.setXYZ(i,T.x,T.y,T.z)} q.needsUpdate=true;
+  });
+  renderer.render(scene,camera);
+})();
+</script>
+</body>
+</html>
